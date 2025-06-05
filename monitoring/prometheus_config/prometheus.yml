@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # external_labels:
+  #   monitor: 'vps-central-monitor'
+
+scrape_configs:
+  - job_name: 'prometheus' # Scrapes Prometheus itself
+    static_configs:
+      - targets: ['central_prometheus:9090']
+
+  - job_name: 'node-exporter' # Scrapes Node Exporter for host metrics
+    # The node-exporter service is on the same 'monitoring_network'
+    # and its default port is 9100.
+    static_configs:
+      - targets: ['central_node_exporter:9100']
+
+  - job_name: 'cadvisor' # Scrapes cAdvisor for container metrics
+    # The cadvisor service is on the same 'monitoring_network'
+    # and its default port is 8080.
+    static_configs:
+      - targets: ['central_cadvisor:8080']
+
+# --- Application Specific Scrape Configs ---
+# This section is where you would add configurations for your applications.
+# The vps-core-setup README.md explains how to do this.
+
+# Example for an application named 'my-app' exposing metrics on port 8001:
+# - job_name: 'my-app'
+#   # Assuming 'my-app' is on the 'monitoring_network' Docker network
+#   # and its service name in its own docker-compose.yaml is 'my_app_service_name'.
+#   # If it was started with `docker run --name my-app-container ...` on the monitoring_network,
+#   # you could use 'my-app-container:8001'.
+#   # If using Docker Swarm or a compose file with service name 'my_app_service',
+#   # Docker DNS should resolve 'my_app_service_name:8001'.
+#   static_configs:
+#     - targets: ['my-app-container-name-or-service-name:8001']
+
+# Example for LOB Collector (if deployed on the same Docker host and joined to monitoring_network):
+# - job_name: 'lob-collector'
+#   static_configs:
+#     # 'lob-collector' is the service name in its docker-compose.yaml
+#     # 8001 is the default metrics port for lob-collector
+#     - targets: ['lob-collector:8001'] 

@@ -1,0 +1,87 @@
+version: '3.8'
+
+networks:
+  monitoring_network:
+    name: monitoring_network
+    driver: bridge
+
+volumes:
+  prometheus_data: {} # Docker managed volume for Prometheus
+  grafana_data: {}    # Docker managed volume for Grafana
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.47.2
+    container_name: central_prometheus
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+    ports:
+      - "9090:9090" # Prometheus UI
+    volumes:
+      - ./prometheus_config:/etc/prometheus:ro # Mounts the prometheus.yml from the host
+      - prometheus_data:/prometheus # Persistent data for Prometheus
+    user: "65534:65534" # nobody:nogroup
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle' # Allows reloading config via API POST to /-/reload
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--log.level=info'
+
+  grafana:
+    image: grafana/grafana-oss:latest # Use latest stable OSS version
+    container_name: central_grafana
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+    ports:
+      - "3000:3000" # Grafana UI
+    volumes:
+      - grafana_data:/var/lib/grafana # Persistent data for Grafana
+    user: "472:472" # grafana user
+    # environment:
+    #   - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_admin_password
+    # For production, set GF_SECURITY_ADMIN_PASSWORD or use Docker secrets for the admin password.
+    # Default admin/admin if not set.
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: central_node_exporter
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+    # Node exporter does not need to expose ports to host if Prometheus scrapes it over the monitoring_network.
+    # Exposing port 9100 can be useful for debugging.
+    # ports:
+    #   - "9100:9100"
+    pid: "host" # Access host process information
+    volumes:
+      - /:/host:ro,rslave # Mount host root filesystem read-only
+      - /proc:/host/proc:ro # Mount host /proc read-only
+      - /sys:/host/sys:ro   # Mount host /sys read-only
+    command:
+      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      # Exclude mount points and fs types to reduce noise and improve performance
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run/docker/netns|var/lib/docker/containers/.+|var/lib/docker/overlay2/.+)($$|/)'
+      - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: central_cadvisor
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+    # cAdvisor's own UI is on port 8080. Expose if direct access needed for debugging.
+    # ports:
+    #  - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw # Docker socket access
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro # Docker lib directory
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro # cgroup v2 (adjust for cgroup v1 if needed)
+    privileged: true # Required for full metrics access 
