@@ -16,8 +16,8 @@ When deploying your application, you can assume the following about the VPS envi
 *   **Firewall (UFW):** UFW is active. Standard ports (22, 80, 443, 3000, 9090) and the application range `8000-8999/tcp` are open. If your application needs other ports, you'll need to open them using `sudo ufw allow <port>/tcp`.
 *   **Centralized Monitoring:**
     *   A Docker network named `monitoring_network` exists.
-    *   A central Prometheus instance (`central_prometheus`) is running and connected to `monitoring_network`, scraping metrics from host (Node Exporter) and containers (cAdvisor).
-    *   A central Grafana instance (`central_grafana`) is running for dashboards.
+    *   A central Prometheus instance (container name: `central_prometheus`) is running and connected to `monitoring_network`, scraping metrics from the host (Node Exporter) and containers (cAdvisor).
+    *   A central Grafana instance (container name: `central_grafana`) is running for dashboards.
     *   The Prometheus configuration is at `/opt/monitoring/prometheus_config/prometheus.yml` (editable by `deploy` with `sudo`).
 
 ## 2. Preparing Your Application for Deployment
@@ -81,12 +81,12 @@ Create a `docker-compose.yaml` file for your application. This simplifies deploy
           # - ./config/my_app_config.yaml:/app/config.yaml:ro
         networks:
           - default # For app-internal communication if you have multiple services for this app
-          - central_monitoring_net
+          - monitoring_network_external
 
     networks:
       default:
         driver: bridge
-      central_monitoring_net: # Definition to connect to the existing network
+      monitoring_network_external: # Definition to connect to the existing network
         name: monitoring_network
         external: true
 
@@ -154,7 +154,7 @@ If your application exposes metrics on a Prometheus-compatible endpoint (e.g., `
     ```bash
     curl -X POST http://localhost:9090/-/reload
     ```
-    (Or restart: `sudo /bin/bash -c "cd /opt/monitoring && docker compose restart central_prometheus"`)
+    (Or restart: `sudo /bin/bash -c "cd /opt/monitoring && docker compose restart prometheus"`)
 
 5.  **Verify in Prometheus UI:**
     *   Go to `http://<YOUR_VPS_IP>:9090` -> Status -> Targets.
@@ -180,6 +180,160 @@ From your application's directory on the VPS:
 *   **Start application:** `docker compose up -d`
 *   **Pull latest image and restart (if image is from a registry):** `docker compose pull && docker compose up -d --remove-orphans`
 *   **Rebuild image and restart (if image is built locally):** `docker compose build && docker compose up -d --remove-orphans`
+
+## 7. Complete Working Example: The Dummy App
+
+The `vps-core-setup` repository includes a complete working example in `test_assets/dummy_app/` that demonstrates all the best practices outlined in this guide. Here's how it's structured:
+
+### 7.1. Application Code (`dummy_app.py`)
+
+```python
+from flask import Flask, Response
+from prometheus_client import Counter, Gauge, generate_latest, REGISTRY
+import random
+import time
+
+app = Flask(__name__)
+
+# Define some dummy metrics
+DUMMY_REQUESTS_TOTAL = Counter(
+    'dummy_app_requests_total',
+    'Total HTTP requests to the dummy app',
+    ['endpoint']
+)
+DUMMY_STATIC_VALUE = Gauge(
+    'dummy_app_static_value',
+    'A dummy metric with a static value'
+)
+DUMMY_RANDOM_VALUE = Gauge(
+    'dummy_app_random_value',
+    'A dummy metric with a random value'
+)
+
+# Set a static value for one of the metrics
+DUMMY_STATIC_VALUE.set(42)
+
+@app.route('/')
+def hello():
+    DUMMY_REQUESTS_TOTAL.labels(endpoint='/').inc()
+    DUMMY_RANDOM_VALUE.set(random.randint(0, 100))
+    return "Hello from Dummy App! Metrics are at /metrics\n"
+
+@app.route('/test')
+def test_endpoint():
+    DUMMY_REQUESTS_TOTAL.labels(endpoint='/test').inc()
+    DUMMY_RANDOM_VALUE.set(random.randint(100, 200))
+    return "This is the /test endpoint of Dummy App!\n"
+
+@app.route('/metrics')
+def metrics():
+    return Response(generate_latest(REGISTRY), 
+                   mimetype='text/plain; version=0.0.4; charset=utf-8')
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8008)
+```
+
+**Key Points:**
+- Flask web application with multiple endpoints
+- Prometheus metrics integration using `prometheus_client`
+- Metrics exposed on `/metrics` endpoint
+- Includes both static metrics (for testing) and dynamic metrics (request counters)
+
+### 7.2. Dockerfile
+
+```dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install dependencies, including curl for the healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+COPY dummy_app.py . 
+RUN pip install --no-cache-dir Flask prometheus_client
+
+EXPOSE 8008
+
+CMD ["python", "dummy_app.py"]
+```
+
+**Key Points:**
+- Uses lightweight `python:3.9-slim` base image
+- Installs `curl` for healthchecks
+- Minimal dependencies for demonstration
+- Exposes the application port
+
+### 7.3. Docker Compose Configuration
+
+```yaml
+services:
+  dummy-app:
+    build:
+      context: . 
+      dockerfile: Dockerfile
+    container_name: dummy_app_container
+    ports:
+      - "8008:8008"  # Port mapping within allowed range (8000-8999)
+    networks:
+      - monitoring_network_external
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  monitoring_network_external:
+    name: monitoring_network
+    external: true 
+```
+
+**Key Points:**
+- Connects to the existing `monitoring_network` for Prometheus scraping
+- Includes comprehensive healthcheck using the `/metrics` endpoint
+- Uses port 8008 (within the allowed 8000-8999 range)
+- Consistent container naming for easy identification
+
+### 7.4. How the Dummy App Integrates with Monitoring
+
+When deployed, the dummy app demonstrates the complete monitoring integration:
+
+1. **Network Connectivity**: Connected to `monitoring_network` so Prometheus can reach it
+2. **Metrics Endpoint**: Exposes Prometheus-compatible metrics at `/metrics`
+3. **Dynamic Configuration**: The test script demonstrates how to:
+   - Add a scrape job to Prometheus configuration
+   - Reload Prometheus configuration
+   - Verify metrics are being scraped
+   - Clean up configuration after testing
+
+### 7.5. Testing the Integration
+
+The `test-vps-setup.sh` script uses this dummy app to validate the entire monitoring pipeline:
+
+```bash
+# Example scrape job added to Prometheus
+- job_name: 'dummy-app-test-job'
+  static_configs:
+    - targets: ['dummy_app_container:8008']
+```
+
+This demonstrates the correct pattern for connecting your applications to the centralized monitoring.
+
+### 7.6. Use This as Your Template
+
+To deploy your own application following this pattern:
+
+1. **Copy the structure**: Use the dummy app as a starting template
+2. **Replace the application logic**: Substitute `dummy_app.py` with your own application
+3. **Update dependencies**: Modify the Dockerfile to install your app's dependencies
+4. **Configure metrics**: Add Prometheus metrics to your application code
+5. **Test locally**: Verify your Docker Compose setup works
+6. **Deploy and integrate**: Follow the deployment steps in this guide
+
+The dummy app serves as both a validation tool for the VPS setup and a reference implementation for proper application integration.
 
 ---
 

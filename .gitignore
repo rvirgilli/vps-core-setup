@@ -1,1 +1,28 @@
+# IDE and editor artifacts
 .history/*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Temporary files
+*.tmp
+*.temp
+
+# Logs
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets (if any local config files are created)
+.env
+.env.local
+secrets/

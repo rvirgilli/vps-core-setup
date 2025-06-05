@@ -60,11 +60,11 @@ The `vps-setup.sh` script will perform the following actions:
     *   Tests SSH authentication to GitHub.
 7.  **Central Monitoring Stack Deployment:**
     *   Creates configuration files at `/opt/monitoring/docker-compose.monitoring.yml` and `/opt/monitoring/prometheus_config/prometheus.yml`.
-    *   Starts the following services using Docker Compose (managed by root, but `deploy` user can inspect logs if needed):
-        *   `central_prometheus`
-        *   `central_grafana`
-        *   `central_node_exporter`
-        *   `central_cadvisor`
+    *   Starts the following services using Docker Compose. The services are named simply (e.g., `prometheus`), but the containers are given explicit `central_*` names for clarity (e.g., `container_name: central_prometheus`):
+        *   `prometheus` (container: `central_prometheus`)
+        *   `grafana` (container: `central_grafana`)
+        *   `node-exporter` (container: `central_node_exporter`)
+        *   `cadvisor` (container: `central_cadvisor`)
     *   These services are connected to a Docker network named `monitoring_network`.
 8.  **UFW (Firewall) Configuration:**
     *   Denies all incoming traffic by default, allows all outgoing.
@@ -89,23 +89,23 @@ The `vps-setup.sh` script deploys a monitoring stack using Docker Compose, locat
 
 ### 2.1. Components
 
-*   **Prometheus (`central_prometheus`):**
+*   **Prometheus (`prometheus` service, `central_prometheus` container):**
     *   Collects and stores metrics.
     *   Configured to scrape itself, Node Exporter, and cAdvisor by default.
     *   **UI:** `http://<YOUR_VPS_IP>:9090`
     *   **Configuration:** `/opt/monitoring/prometheus_config/prometheus.yml` on the VPS.
     *   **Data Volume:** Docker named volume `prometheus_data`.
-*   **Grafana (`central_grafana`):**
+*   **Grafana (`grafana` service, `central_grafana` container):**
     *   For visualizing metrics and creating dashboards.
     *   **UI:** `http://<YOUR_VPS_IP>:3000`
     *   **Default Login:** `admin` / `admin` (change this immediately!)
     *   **Data Volume:** Docker named volume `grafana_data`.
-*   **Node Exporter (`central_node_exporter`):**
+*   **Node Exporter (`node-exporter` service, `central_node_exporter` container):**
     *   Exposes a wide range of host machine metrics (CPU, memory, disk, network, etc.).
-    *   Scraped by `central_prometheus`.
-*   **cAdvisor (`central_cadvisor`):**
+    *   Scraped by `prometheus`.
+*   **cAdvisor (`cadvisor` service, `central_cadvisor` container):**
     *   Provides container-specific metrics (CPU, memory, network, etc. for each running Docker container).
-    *   Scraped by `central_prometheus`.
+    *   Scraped by `prometheus`.
 
 ### 2.2. Accessing UIs
 
@@ -114,14 +114,14 @@ The `vps-setup.sh` script deploys a monitoring stack using Docker Compose, locat
 
 ### 2.3. Managing Monitoring Services
 
-The monitoring stack is managed by root using Docker Compose commands in the `/opt/monitoring` directory.
+The monitoring stack is managed by root using Docker Compose commands in the `/opt/monitoring` directory. Note that you must use the **service name** (e.g., `prometheus`), not the container name, in `docker compose` commands.
 
 *   **View logs:**
     ```bash
     # Run as root or with sudo
     cd /opt/monitoring
-    docker compose logs -f central_prometheus
-    docker compose logs -f central_grafana
+    docker compose logs -f prometheus
+    docker compose logs -f grafana
     # etc.
     ```
 *   **Stop services:**
@@ -134,7 +134,7 @@ The monitoring stack is managed by root using Docker Compose commands in the `/o
     ```
 *   **Restart a specific service (e.g., Prometheus after config change):**
     ```bash
-    sudo /bin/bash -c "cd /opt/monitoring && docker compose restart central_prometheus"
+    sudo /bin/bash -c "cd /opt/monitoring && docker compose restart prometheus"
     ```
 
 ## 3. Connecting Application Projects to Central Monitoring
@@ -155,7 +155,7 @@ This guide covers:
 2.  Your application should expose metrics in a Prometheus-compatible format (e.g., on `/metrics`).
 3.  On the VPS, edit `/opt/monitoring/prometheus_config/prometheus.yml` (with `sudo`) to add a new scrape job targeting your application's service name and metrics port (e.g., `my-app-service:8001`).
 4.  Reload Prometheus: `curl -X POST http://localhost:9090/-/reload`.
-5.  Once Prometheus scrapes your app, you can add Prometheus as a data source in Grafana (`http://central_prometheus:9090`) and build dashboards.
+5.  Once Prometheus scrapes your app, you can add Prometheus as a data source in Grafana (`http://prometheus:9090`) and build dashboards.
 
 ## 4. Troubleshooting `vps-setup.sh`
 

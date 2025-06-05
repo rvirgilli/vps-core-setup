@@ -9,11 +9,11 @@
 set -euo pipefail # Exit on error, treat unset variables as an error, propagate exit status through pipes
 
 # --- Configuration ---
-PROMETHEUS_URL="http://localhost:9090"
-GRAFANA_URL="http://localhost:3000"
+PROMETHEUS_URL="http://127.0.0.1:9090"
+GRAFANA_URL="http://127.0.0.1:3000"
 CENTRAL_PROM_CONFIG_PATH="/opt/monitoring/prometheus_config/prometheus.yml"
 CENTRAL_PROM_CONFIG_BACKUP_PATH="/opt/monitoring/prometheus_config/prometheus.yml.test-bak"
-DUMMY_APP_DIR="./test_assets/dummy_app" # Relative to the script location (repo root)
+DUMMY_APP_DIR="./test_assets/dummy_app"
 DUMMY_APP_COMPOSE_FILE="${DUMMY_APP_DIR}/docker-compose.dummy.yml"
 DUMMY_APP_CONTAINER_NAME="dummy_app_container"
 DUMMY_APP_METRICS_PORT="8008"
@@ -33,7 +33,7 @@ step_count=0
 failed_steps=0
 
 print_step() {
-    ((step_count++))
+    step_count=$((step_count + 1))
     echo -e "\n${COL_BLUE}>>> Step ${step_count}: $1${COL_RESET}"
 }
 
@@ -61,27 +61,30 @@ check_command() {
 cleanup_and_exit() {
     print_step "Performing final cleanup (if necessary)..."
 
+    # Stop dummy application if running
     echo "   Stopping dummy application (if running)..."
-    if [ -f "${DUMMY_APP_COMPOSE_FILE}" ] && (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" ps -q); then
-      (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" down -v)
-      pass_test "Dummy application stack stopped and volumes removed."
+    if [ -f "${DUMMY_APP_COMPOSE_FILE}" ] && (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" ps -q) > /dev/null 2>&1; then
+        (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" down -v)
+        pass_test "Dummy application stack stopped and volumes removed."
     else
-      echo "   Dummy application not running or compose file not found."
+        echo "   Dummy application not running."
     fi
 
+    # Restore Prometheus configuration if backup exists
     if [ -f "${CENTRAL_PROM_CONFIG_BACKUP_PATH}" ]; then
-        echo "   Restoring original Prometheus configuration from ${CENTRAL_PROM_CONFIG_BACKUP_PATH}..."
+        echo "   Restoring original Prometheus configuration..."
         sudo mv "${CENTRAL_PROM_CONFIG_BACKUP_PATH}" "${CENTRAL_PROM_CONFIG_PATH}"
-        echo "   Reloading Prometheus configuration after restore..."
-        if sudo curl -s -X POST "${PROMETHEUS_URL}/-/reload"; then
+        echo "   Reloading Prometheus configuration..."
+        if sudo curl -s -X POST "${PROMETHEUS_URL}/-/reload" > /dev/null 2>&1; then
             pass_test "Prometheus configuration restored and reloaded."
         else
-            warn_test "Failed to reload Prometheus after restoring config. Please check Prometheus manually."
+            warn_test "Failed to reload Prometheus after restoring config. Please check manually."
         fi
     else
-        echo "   No Prometheus backup file found at ${CENTRAL_PROM_CONFIG_BACKUP_PATH} to restore."
+        echo "   No Prometheus backup file found to restore."
     fi
 
+    # Print final status
     if [ ${failed_steps} -gt 0 ]; then
         echo -e "\n${COL_RED}========================================="
         echo -e "    TEST SUITE COMPLETED WITH ERRORS    "
@@ -95,19 +98,19 @@ cleanup_and_exit() {
     exit ${failed_steps}
 }
 
-# Trap SIGINT and SIGTERM to run cleanup function
+# Set up cleanup trap for SIGINT and SIGTERM
 trap cleanup_and_exit SIGINT SIGTERM
 
-# --- Main Test Script --- #
+# --- Main Test Script ---
 
 print_step "Checking prerequisites..."
 for cmd in "${REQUIRED_CMDS[@]}"; do
     check_command "$cmd"
 done
+
 if ! sudo -n true 2>/dev/null; then
     warn_test "User $(whoami) may need to enter password for sudo commands."
 fi
-
 
 print_step "Phase 1: Checking Core Monitoring Services Status..."
 CORE_SERVICES=("central_prometheus" "central_grafana" "central_node_exporter" "central_cadvisor")
@@ -119,27 +122,30 @@ for service in "${CORE_SERVICES[@]}"; do
     fi
 done
 
-# Check Prometheus UI Access
-if curl -s -o /dev/null -w "%{http_code}" "${PROMETHEUS_URL}" | grep -q "200"; then
-    pass_test "Prometheus UI (${PROMETHEUS_URL}) is accessible (HTTP 200)."
+# Check Prometheus UI access (accept 200 OK or 302 redirect)
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${PROMETHEUS_URL}")
+if [ "${HTTP_CODE}" -eq 200 ] || [ "${HTTP_CODE}" -eq 302 ]; then
+    pass_test "Prometheus UI (${PROMETHEUS_URL}) is accessible (HTTP ${HTTP_CODE})."
 else
-    fail_test "Prometheus UI (${PROMETHEUS_URL}) is NOT accessible."
+    fail_test "Prometheus UI (${PROMETHEUS_URL}) is NOT accessible. HTTP code: ${HTTP_CODE}"
 fi
 
-# Check Grafana UI Access
-if curl -s -o /dev/null -w "%{http_code}" "${GRAFANA_URL}" | grep -q "200"; then
-    pass_test "Grafana UI (${GRAFANA_URL}) is accessible (HTTP 200)."
+# Check Grafana UI access (accept 200 OK or 302 redirect)
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${GRAFANA_URL}")
+if [ "${HTTP_CODE}" -eq 200 ] || [ "${HTTP_CODE}" -eq 302 ]; then
+    pass_test "Grafana UI (${GRAFANA_URL}) is accessible (HTTP ${HTTP_CODE})."
 else
-    fail_test "Grafana UI (${GRAFANA_URL}) is NOT accessible."
+    fail_test "Grafana UI (${GRAFANA_URL}) is NOT accessible. HTTP code: ${HTTP_CODE}"
 fi
 
+# Exit early if core services aren't working
 if [ ${failed_steps} -gt 0 ]; then
     echo -e "${COL_RED}Critical core services check failed. Aborting further tests.${COL_RESET}"
     cleanup_and_exit
 fi
 
-
-print_step "Phase 2: Deploying Dummy Application (from ${DUMMY_APP_DIR})..."
+print_step "Phase 2: Deploying Dummy Application..."
+# Validate required files exist
 if [ ! -d "${DUMMY_APP_DIR}" ]; then
     fail_test "Dummy application directory ${DUMMY_APP_DIR} not found."
     cleanup_and_exit
@@ -149,117 +155,110 @@ if [ ! -f "${DUMMY_APP_COMPOSE_FILE}" ]; then
     cleanup_and_exit
 fi
 
+# Deploy dummy application
 echo "   Building and starting dummy application..."
-(cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" up -d --build --remove-orphans)
-if [ $? -eq 0 ]; then
-    pass_test "Dummy application \`docker compose up\` command executed successfully."
+if (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" up -d --build --remove-orphans); then
+    pass_test "Dummy application deployed successfully."
 else
-    fail_test "Dummy application \`docker compose up\` command failed."
+    fail_test "Dummy application deployment failed."
     (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" logs)
     cleanup_and_exit
 fi
 
-echo "   Waiting for dummy application (${DUMMY_APP_CONTAINER_NAME}) to become healthy..."
-HEALTH_STATUS_CMD="sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no healthcheck{{end}}' ${DUMMY_APP_CONTAINER_NAME}"
-TIMEOUT_SECONDS=120 # 2 minutes
+# Wait for application to become healthy
+echo "   Waiting for dummy application to become healthy..."
+TIMEOUT_SECONDS=120
 INTERVAL_SECONDS=5
 ELAPSED_SECONDS=0
 HEALTHY=false
 
 while [ ${ELAPSED_SECONDS} -lt ${TIMEOUT_SECONDS} ]; do
-    STATUS=$(eval "${HEALTH_STATUS_CMD}" 2>/dev/null || echo "inspect_error")
-    if [ "${STATUS}" == "healthy" ]; then
-        HEALTHY=true
-        break
-    fi
-    if [ "${STATUS}" == "unhealthy" ]; then
-        fail_test "Dummy application (${DUMMY_APP_CONTAINER_NAME}) reported as unhealthy."
-        (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" logs)
-        cleanup_and_exit
-    fi
-    if [ "${STATUS}" == "no healthcheck" ]; then
-        warn_test "Dummy application (${DUMMY_APP_CONTAINER_NAME}) does not have a healthcheck configured in Docker. Assuming it started okay after a brief pause."
-        sleep 15 # Give some time if no healthcheck
-        HEALTHY=true # Assume healthy for test to proceed
-        break
-    fi
+    STATUS=$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no healthcheck{{end}}' ${DUMMY_APP_CONTAINER_NAME} 2>/dev/null || echo "inspect_error")
+    
+    case "${STATUS}" in
+        "healthy")
+            HEALTHY=true
+            break
+            ;;
+        "unhealthy")
+            fail_test "Dummy application reported as unhealthy."
+            (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" logs)
+            cleanup_and_exit
+            ;;
+        "no healthcheck")
+            warn_test "No healthcheck configured. Assuming healthy after brief pause."
+            sleep 15
+            HEALTHY=true
+            break
+            ;;
+    esac
+    
     sleep ${INTERVAL_SECONDS}
     ELAPSED_SECONDS=$((ELAPSED_SECONDS + INTERVAL_SECONDS))
-    echo "   ... waiting (${ELAPSED_SECONDS}s / ${TIMEOUT_SECONDS}s), status: ${STATUS}"
+    echo "   ... waiting (${ELAPSED_SECONDS}s/${TIMEOUT_SECONDS}s), status: ${STATUS}"
 done
 
 if [ "${HEALTHY}" = true ]; then
-    pass_test "Dummy application (${DUMMY_APP_CONTAINER_NAME}) is ready."
+    pass_test "Dummy application is ready."
 else
-    fail_test "Dummy application (${DUMMY_APP_CONTAINER_NAME}) did not become healthy within ${TIMEOUT_SECONDS} seconds. Last status: ${STATUS}"
-    (cd "${DUMMY_APP_DIR}" && sudo docker compose -f "${DUMMY_APP_COMPOSE_FILE##*/}" logs)
+    fail_test "Dummy application did not become healthy within ${TIMEOUT_SECONDS} seconds."
     cleanup_and_exit
 fi
 
-
-print_step "Phase 3: Configuring Central Prometheus to Scrape Dummy Application..."
-# Backup Prometheus config
-echo "   Backing up ${CENTRAL_PROM_CONFIG_PATH} to ${CENTRAL_PROM_CONFIG_BACKUP_PATH}..."
-sudo cp "${CENTRAL_PROM_CONFIG_PATH}" "${CENTRAL_PROM_CONFIG_BACKUP_PATH}"
-if [ $? -ne 0 ]; then
-    fail_test "Failed to backup Prometheus configuration."
+print_step "Phase 3: Configuring Prometheus to Scrape Dummy Application..."
+# Create backup of Prometheus configuration
+echo "   Backing up Prometheus configuration..."
+if sudo cp "${CENTRAL_PROM_CONFIG_PATH}" "${CENTRAL_PROM_CONFIG_BACKUP_PATH}"; then
+    pass_test "Prometheus configuration backed up."
+else
+    fail_test "Failed to back up Prometheus configuration."
     cleanup_and_exit
 fi
-pass_test "Prometheus configuration backed up."
 
-# Add scrape job for dummy app
-SCRAPE_CONFIG_BLOCK="\n  - job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'\n    static_configs:\n      - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']"
+# Add scrape job for dummy application
+echo "   Adding scrape configuration for dummy application..."
+SCRAPE_CONFIG="\n  - job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'\n    static_configs:\n      - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']"
+echo -e "${SCRAPE_CONFIG}" | sudo tee -a "${CENTRAL_PROM_CONFIG_PATH}" > /dev/null
+pass_test "Scrape configuration added."
 
-echo "   Adding scrape configuration for dummy app to ${CENTRAL_PROM_CONFIG_PATH}..."
-echo -e "${SCRAPE_CONFIG_BLOCK}" | sudo tee -a "${CENTRAL_PROM_CONFIG_PATH}" > /dev/null
-pass_test "Scrape configuration for dummy app added."
-
-# Reload Prometheus
+# Reload Prometheus configuration
 echo "   Reloading Prometheus configuration..."
 RELOAD_OUTPUT=$(sudo curl -s -X POST "${PROMETHEUS_URL}/-/reload" -w "%{http_code}")
 HTTP_CODE=${RELOAD_OUTPUT: -3}
 if [ "${HTTP_CODE}" == "200" ]; then
-    pass_test "Prometheus reloaded successfully (HTTP 200)."
+    pass_test "Prometheus reloaded successfully."
 else
-    fail_test "Failed to reload Prometheus. HTTP code: ${HTTP_CODE}. Output: ${RELOAD_OUTPUT::-3}"
+    fail_test "Failed to reload Prometheus. HTTP code: ${HTTP_CODE}"
     cleanup_and_exit
 fi
 
-
-print_step "Phase 4: Verifying Prometheus Scraping of Dummy Application..."
-# Give Prometheus time to scrape. Default scrape interval is 15s, let's wait a bit more.
+print_step "Phase 4: Verifying Prometheus Scraping..."
+# Wait for Prometheus to scrape the new target
 SCRAPE_WAIT_SECONDS=35
-echo "   Waiting ${SCRAPE_WAIT_SECONDS} seconds for Prometheus to scrape the new target..."
+echo "   Waiting ${SCRAPE_WAIT_SECONDS} seconds for Prometheus to scrape the target..."
 sleep ${SCRAPE_WAIT_SECONDS}
 
-# Check target health
-echo "   Checking dummy app target health in Prometheus..."
-TARGET_HEALTH_URL="${PROMETHEUS_URL}/api/v1/targets?state=active"
-TARGET_HEALTH=$(curl -s "${TARGET_HEALTH_URL}" | jq -r --arg job "${DUMMY_APP_SCRAPE_JOB_NAME}" '.data.activeTargets[] | select(.scrapePool == $job) | .health' 2>/dev/null)
+# Check target health in Prometheus
+echo "   Verifying target health in Prometheus..."
+TARGET_HEALTH=$(curl -s "${PROMETHEUS_URL}/api/v1/targets?state=active" | jq -r --arg job "${DUMMY_APP_SCRAPE_JOB_NAME}" '.data.activeTargets[] | select(.scrapePool == $job) | .health' 2>/dev/null)
 
 if [ "${TARGET_HEALTH}" == "up" ]; then
-    pass_test "Dummy app target ('${DUMMY_APP_SCRAPE_JOB_NAME}') is 'up' in Prometheus."
+    pass_test "Dummy app target is 'up' in Prometheus."
 else
-    fail_test "Dummy app target ('${DUMMY_APP_SCRAPE_JOB_NAME}') is NOT 'up' in Prometheus. Last reported health: '${TARGET_HEALTH:-Not Found}'."
-    echo "   Debug: Check ${PROMETHEUS_URL}/targets"
-    # Attempt to show scrape errors if any
-    curl -s "${PROMETHEUS_URL}/api/v1/targets?state=active" | jq --arg job "${DUMMY_APP_SCRAPE_JOB_NAME}" '.data.activeTargets[] | select(.scrapePool == $job)' || echo "jq parse error or target not found"
+    fail_test "Dummy app target is not 'up'. Status: '${TARGET_HEALTH:-Not Found}'"
+    echo "   Debug: Check ${PROMETHEUS_URL}/targets for more details."
 fi
 
-# Check specific metric value
-echo "   Querying for metric 'dummy_app_static_value' from dummy app..."
-METRIC_QUERY_URL="${PROMETHEUS_URL}/api/v1/query?query=dummy_app_static_value{\"${DUMMY_APP_SCRAPE_JOB_NAME}\"}"
-METRIC_VALUE=$(curl -s "${METRIC_QUERY_URL}" | jq -r '.data.result[0].value[1]' 2>/dev/null)
+# Verify specific metric can be queried
+echo "   Querying for test metric 'dummy_app_static_value'..."
+METRIC_VALUE=$(curl -s "${PROMETHEUS_URL}/api/v1/query?query=dummy_app_static_value" | jq -r '.data.result[0].value[1]' 2>/dev/null)
 
 if [ "${METRIC_VALUE}" == "42" ]; then
     pass_test "Metric 'dummy_app_static_value' successfully scraped with expected value (42)."
 else
-    fail_test "Metric 'dummy_app_static_value' not found or has incorrect value. Expected: 42, Got: '${METRIC_VALUE:-Not Found}'."
-    echo "   Debug: Query URL: ${METRIC_QUERY_URL}"
-    curl -s "${METRIC_QUERY_URL}" | jq '.' || echo "jq parse error or metric not found"
+    fail_test "Metric query failed. Expected: 42, Got: '${METRIC_VALUE:-Not Found}'"
+    echo "   Debug: Query URL: ${PROMETHEUS_URL}/api/v1/query?query=dummy_app_static_value"
 fi
 
-
-# --- Trigger Cleanup --- #
-# This will also report the final status
+# Trigger cleanup and show final results
 cleanup_and_exit 

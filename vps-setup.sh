@@ -12,6 +12,7 @@
 #
 # At the end, SSH→GitHub authentication is tested for user "deploy".
 # The script also deploys a central monitoring stack (Prometheus, Grafana, etc.).
+# Finally, it runs comprehensive tests to validate the entire setup.
 
 set -euo pipefail
 
@@ -26,6 +27,8 @@ MONITORING_DIR="/opt/monitoring"
 PROMETHEUS_CONFIG_DIR="${MONITORING_DIR}/prometheus_config"
 DOCKER_COMPOSE_MONITORING_FILE="${MONITORING_DIR}/docker-compose.monitoring.yml"
 PROMETHEUS_CONFIG_FILE="${PROMETHEUS_CONFIG_DIR}/prometheus.yml"
+REPO_URL="https://github.com/rvirgilli/vps-core-setup.git"
+REPO_CLONE_DIR="/opt/vps-core-setup"
 # --- End Configuration ---
 
 # 1) Verify script is run as root (via sudo)
@@ -43,7 +46,7 @@ echo "1) Updating system and installing basic packages..."
 echo "--------------------------------------------------"
 apt-get update
 apt-get upgrade -y "${DPKG_OPTS[@]}"
-apt-get install -y "${DPKG_OPTS[@]}" curl ufw jq
+apt-get install -y "${DPKG_OPTS[@]}" curl ufw jq git
 
 echo
 echo "2) Installing Docker (if not already installed)..."
@@ -168,9 +171,13 @@ ssh-keyscan github.com 2>/dev/null | sudo -u "${DEPLOY_USER}" tee "/home/${DEPLO
 sudo -u "${DEPLOY_USER}" chmod 600 "/home/${DEPLOY_USER}/.ssh/known_hosts"
 
 echo "   Attempting SSH connection to GitHub as user '${DEPLOY_USER}'..."
+# Temporarily disable 'exit on error' because ssh -T always exits with 1 on success.
+set +e
 # Capture all output (STDOUT and STDERR) and the exit code
 SSH_OUTPUT=$(sudo -u "${DEPLOY_USER}" ssh -o ConnectTimeout=10 -T git@github.com 2>&1)
 SSH_EXIT_CODE=$?
+set -e
+# Re-enabled 'exit on error'
 
 # Check for the primary success message (case-insensitive)
 if echo "${SSH_OUTPUT}" | grep -i -q "You've successfully authenticated"; then
@@ -197,12 +204,26 @@ else
 fi
 
 echo
-echo "9) Setting up Central Monitoring Stack (Prometheus & Grafana)..."
-echo "-----------------------------------------------------------------"
+echo "9) Cloning Repository and Setting up Central Monitoring Stack..."
+echo "----------------------------------------------------------------"
+# Clone the repository first to get monitoring configuration files
+if [ ! -d "${REPO_CLONE_DIR}" ]; then
+    echo "   → Cloning vps-core-setup repository to ${REPO_CLONE_DIR}..."
+    if git clone "${REPO_URL}" "${REPO_CLONE_DIR}"; then
+        echo "   → Repository cloned successfully."
+    else
+        echo "   ⚠️ ERROR: Failed to clone repository. Cannot set up monitoring stack."
+        echo "      Please check your internet connection and GitHub access."
+        exit 1
+    fi
+else
+    echo "   → Repository already exists at ${REPO_CLONE_DIR}. Pulling latest changes..."
+    (cd "${REPO_CLONE_DIR}" && git pull) || echo "   ⚠️  Warning: Failed to pull latest changes. Proceeding with existing code."
+fi
+
 # Define source paths from the cloned repository
-CLONED_REPO_PATH="/opt/vps-core-setup" # This is where the script clones the repo
-SOURCE_DOCKER_COMPOSE_MONITORING_FILE="${CLONED_REPO_PATH}/monitoring/docker-compose.monitoring.yml"
-SOURCE_PROMETHEUS_CONFIG_FILE="${CLONED_REPO_PATH}/monitoring/prometheus_config/prometheus.yml"
+SOURCE_DOCKER_COMPOSE_MONITORING_FILE="${REPO_CLONE_DIR}/monitoring/docker-compose.monitoring.yml"
+SOURCE_PROMETHEUS_CONFIG_FILE="${REPO_CLONE_DIR}/monitoring/prometheus_config/prometheus.yml"
 
 echo "   → Ensuring monitoring directories exist: ${MONITORING_DIR}, ${PROMETHEUS_CONFIG_DIR}"
 mkdir -p "${PROMETHEUS_CONFIG_DIR}" # This creates /opt/monitoring and /opt/monitoring/prometheus_config
@@ -213,7 +234,7 @@ if [ -f "${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}" ]; then
     echo "   → ${DOCKER_COMPOSE_MONITORING_FILE} copied."
 else
     echo "   ⚠️ ERROR: Source Docker Compose file not found at ${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}. Cannot set up monitoring stack."
-    # Optionally, exit here if this is critical: exit 1
+    exit 1
 fi
 
 if [ -f "${SOURCE_PROMETHEUS_CONFIG_FILE}" ]; then
@@ -222,7 +243,7 @@ if [ -f "${SOURCE_PROMETHEUS_CONFIG_FILE}" ]; then
     echo "   → ${PROMETHEUS_CONFIG_FILE} copied."
 else
     echo "   ⚠️ ERROR: Source Prometheus config file not found at ${SOURCE_PROMETHEUS_CONFIG_FILE}. Cannot set up monitoring stack."
-    # Optionally, exit here: exit 1
+    exit 1
 fi
 
 echo "   → Starting central Prometheus, Grafana, Node Exporter, and cAdvisor services..."
@@ -259,6 +280,42 @@ if ufw --force enable; then
     ufw status verbose
 else
     echo "   ⚠️  Failed to enable UFW."
+fi
+
+echo
+echo "11) Running Comprehensive Tests to Validate Setup..."
+echo "----------------------------------------------------"
+echo "   This will run all tests to validate the entire VPS setup and monitoring stack."
+
+# Set proper ownership and permissions
+echo "   → Setting ownership and permissions for ${DEPLOY_USER}..."
+chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${REPO_CLONE_DIR}"
+chmod +x "${REPO_CLONE_DIR}/test-vps-setup.sh"
+
+# Wait a moment for all services to fully start up
+echo "   → Waiting 30 seconds for all services to fully initialize..."
+sleep 30
+
+# Run the test script as the deploy user
+echo "   → Running comprehensive validation tests as user '${DEPLOY_USER}'..."
+echo "     This will test all components: monitoring stack, dummy app deployment, and cleanup."
+echo
+if sudo -u "${DEPLOY_USER}" bash -c "cd '${REPO_CLONE_DIR}' && ./test-vps-setup.sh"; then
+    echo
+    echo "🎉 ALL TESTS PASSED! VPS Setup is fully validated and ready for production use."
+    echo
+    echo "✅ VPS Core Setup Completed Successfully!"
+    echo "========================================"
+else
+    echo
+    echo "⚠️  Some tests failed. The VPS setup may have issues."
+    echo "   Please review the test output above and check:"
+    echo "   • Docker services status: sudo docker ps"
+    echo "   • Monitoring logs: sudo docker logs central_prometheus"
+    echo "   • Network connectivity to monitoring services"
+    echo
+    echo "❌ VPS Core Setup Completed with Test Failures!"
+    echo "==============================================="
 fi
 
 echo

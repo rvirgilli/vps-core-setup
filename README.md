@@ -19,7 +19,7 @@ These steps assume you are logged into your fresh Debian 12 VPS as the `debian` 
     ```bash
     ssh debian@<YOUR_VPS_IP>
     ```
-2.  **Update package list, clone this repository into `/opt`, and run the setup script:**
+2.  **Clone the repository and run the setup script:**
     ```bash
     sudo apt-get update 
     sudo git clone https://github.com/rvirgilli/vps-core-setup.git /opt/vps-core-setup
@@ -28,7 +28,8 @@ These steps assume you are logged into your fresh Debian 12 VPS as the `debian` 
     sudo ./vps-setup.sh
     ```
 3.  **Follow Prompts:** The script will pause to ask you to add the `deploy` user's new SSH key to GitHub.
-4.  **Post-Setup:**
+4.  **Automated Testing:** The setup script automatically runs comprehensive tests at the end to validate the entire setup. If all tests pass, you'll see a green success message and your VPS is ready for production use!
+5.  **Post-Setup:**
     *   Access Prometheus: `http://<YOUR_VPS_IP>:9090`
     *   Access Grafana: `http://<YOUR_VPS_IP>:3000` (Login: `admin`/`admin` - change password immediately!)
     *   SSH as the new `deploy` user: `ssh deploy@<YOUR_VPS_IP>`
@@ -52,10 +53,13 @@ For more detailed information, please refer to the following guides in the `docs
 ## 4. Repository Contents
 
 *   **`README.md`**: This file (Prerequisites, Quickstart, and links to further documentation).
-*   **`vps-setup.sh`**: The main setup script to be run on the VPS.
+*   **`vps-setup.sh`**: The main setup script to be run on the VPS. Includes integrated testing at the end.
+*   **`test-vps-setup.sh`**: Comprehensive test script that validates the entire setup (automatically called by `vps-setup.sh`).
 *   **`monitoring/`**: Contains the canonical Docker Compose and Prometheus configuration files for the central monitoring stack, which are copied by `vps-setup.sh` to `/opt/monitoring/` on the VPS.
     *   `monitoring/docker-compose.monitoring.yml`
     *   `monitoring/prometheus_config/prometheus.yml`
+*   **`test_assets/`**: Contains test applications and configurations used by the test script.
+    *   `test_assets/dummy_app/`: Simple Flask application with Prometheus metrics for testing.
 *   **`docs/`**: Contains detailed documentation.
     *   `docs/DETAILED_SETUP_GUIDE.md`: In-depth information about the setup script, monitoring, troubleshooting, and security.
     *   `docs/APPLICATION_DEPLOYMENT_GUIDE.md`: Guide for application developers.
