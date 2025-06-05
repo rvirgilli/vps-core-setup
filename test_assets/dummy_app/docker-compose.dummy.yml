@@ -1,0 +1,25 @@
+services:
+  dummy-app:
+    build:
+      context: . # Assumes Dockerfile is in the same directory as this compose file
+      dockerfile: Dockerfile
+    container_name: dummy_app_container
+    ports:
+      # Optional: Expose to host for direct testing during development of the test script itself.
+      # For the actual test, Prometheus will scrape it over the Docker network.
+      - "8008:8008"
+    networks:
+      - monitoring_network_external # Connect to the pre-existing monitoring_network
+    restart: unless-stopped
+    # Add a healthcheck to ensure the app is ready before Prometheus tries to scrape it (optional but good)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s # Give it time to start before healthchecks begin
+
+networks:
+  monitoring_network_external:
+    name: monitoring_network # This is the network created by vps-setup.sh
+    external: true 

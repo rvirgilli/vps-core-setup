@@ -43,7 +43,7 @@ echo "1) Updating system and installing basic packages..."
 echo "--------------------------------------------------"
 apt-get update
 apt-get upgrade -y "${DPKG_OPTS[@]}"
-apt-get install -y "${DPKG_OPTS[@]}" curl ufw
+apt-get install -y "${DPKG_OPTS[@]}" curl ufw jq
 
 echo
 echo "2) Installing Docker (if not already installed)..."
@@ -164,26 +164,36 @@ echo "---------------------------------------------------"
 sudo -u "${DEPLOY_USER}" mkdir -p "/home/${DEPLOY_USER}/.ssh"
 sudo -u "${DEPLOY_USER}" touch "/home/${DEPLOY_USER}/.ssh/known_hosts"
 sudo -u "${DEPLOY_USER}" chmod 600 "/home/${DEPLOY_USER}/.ssh/known_hosts"
-# Add GitHub's key to known_hosts. This might fetch multiple key types.
-# We only need one to succeed for the connection to be established without prompt.
 ssh-keyscan github.com 2>/dev/null | sudo -u "${DEPLOY_USER}" tee "/home/${DEPLOY_USER}/.ssh/known_hosts" > /dev/null
-# Ensure permissions are strict again after tee, as tee might change them depending on umask.
 sudo -u "${DEPLOY_USER}" chmod 600 "/home/${DEPLOY_USER}/.ssh/known_hosts"
 
 echo "   Attempting SSH connection to GitHub as user '${DEPLOY_USER}'..."
-# ssh -T git@github.com exits with 1 on success, so check output for success message.
-if sudo -u "${DEPLOY_USER}" ssh -T git@github.com 2>&1 | grep -q "You've successfully authenticated"; then
+# Capture all output (STDOUT and STDERR) and the exit code
+SSH_OUTPUT=$(sudo -u "${DEPLOY_USER}" ssh -o ConnectTimeout=10 -T git@github.com 2>&1)
+SSH_EXIT_CODE=$?
+
+# Check for the primary success message (case-insensitive)
+if echo "${SSH_OUTPUT}" | grep -i -q "You've successfully authenticated"; then
     echo "   ✅ SSH to GitHub successful for user ${DEPLOY_USER}. Authentication confirmed."
-elif sudo -u "${DEPLOY_USER}" ssh -T git@github.com 2>&1 | grep -q "Warning: Permanently added 'github.com'"; then
-    echo "   ✅ SSH to GitHub successful for user ${DEPLOY_USER}. Host key added and authentication confirmed (check for username in message)."
-    # It's possible the "You've successfully authenticated" message is also present, grep -q exits on first match.
-    # For a more robust check, one could capture the full output and check both.
+    # For debugging or verbosity, you can uncomment the next two lines:
+    # echo "      Full GitHub SSH output:"
+    # echo "${SSH_OUTPUT}"
+elif echo "${SSH_OUTPUT}" | grep -q "Warning: Permanently added 'github.com'"; then
+    echo "   ✅ SSH to GitHub: Host key for github.com was added (first-time connection)."
+    echo "      Full GitHub SSH output:"
+    echo "${SSH_OUTPUT}" # This output should contain the authentication message too
+    if echo "${SSH_OUTPUT}" | grep -i -q "You've successfully authenticated"; then
+        echo "   ✅ Authentication confirmed within the same attempt after host key addition."
+    else
+        echo "   ℹ️  Host key added. The authentication message was not found in this attempt. If GitHub access fails later, ensure the key is correctly added to your GitHub account."
+    fi
 else
-    echo "   ⚠️  SSH to GitHub failed for user ${DEPLOY_USER}."
-    echo "      Output of ssh -T git@github.com (run as ${DEPLOY_USER}):"
-    sudo -u "${DEPLOY_USER}" ssh -T git@github.com 2>&1 || true # Print output regardless of exit code
-    echo "      Common issues: Key not added to GitHub account, or network connectivity problems."
-    echo "      The script will continue, but git operations for '${DEPLOY_USER}' might fail later."
+    echo "   ⚠️  SSH to GitHub authentication failed for user ${DEPLOY_USER}."
+    echo "      Neither the standard success message nor a host key warning was found."
+    echo "      Output from ssh -T git@github.com (Exit Code: ${SSH_EXIT_CODE}):"
+    echo "${SSH_OUTPUT}"
+    echo "      Common issues: SSH key not correctly added to your GitHub account, network connectivity problems, or local SSH configuration issues for the 'deploy' user."
+    echo "      The script will continue, but git operations requiring GitHub authentication for '${DEPLOY_USER}' might fail."
 fi
 
 echo
