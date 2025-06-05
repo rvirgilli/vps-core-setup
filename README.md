@@ -4,18 +4,25 @@ This repository provides scripts and configurations to bootstrap a fresh Debian 
 
 Its main goal is to standardize VPS configuration and separate infrastructure setup from application deployment.
 
-## 1. Quickstart
+## 1. Prerequisites
 
-These steps assume you are logged into your fresh Debian 12 VPS as the `debian` user (or another non-root user with sudo privileges), and that `git` is already installed.
+*   A fresh Debian 12 VPS.
+*   Access to the VPS as `root` or a user with `sudo` privileges (e.g., the default `debian` user on many cloud providers).
+*   An SSH key pair on your local machine to access the VPS.
+*   `git` should be pre-installed on the VPS.
+
+## 2. Quickstart
+
+These steps assume you are logged into your fresh Debian 12 VPS as the `debian` user (or another non-root user with sudo privileges), and that all prerequisites are met.
 
 1.  **SSH into your VPS:**
     ```bash
     ssh debian@<YOUR_VPS_IP>
     ```
-2.  **Clone this repository and run the setup script:**
+2.  **Update package list, clone this repository into `/opt`, and run the setup script:**
     ```bash
     sudo apt-get update 
-    git clone https://github.com/rvirgilli/vps-core-setup.git /opt/vps-core-setup
+    sudo git clone https://github.com/rvirgilli/vps-core-setup.git /opt/vps-core-setup
     cd /opt/vps-core-setup
     sudo chmod +x vps-setup.sh
     sudo ./vps-setup.sh
@@ -27,12 +34,6 @@ These steps assume you are logged into your fresh Debian 12 VPS as the `debian` 
     *   SSH as the new `deploy` user: `ssh deploy@<YOUR_VPS_IP>`
 
 For detailed explanations, see the full documentation linked below.
-
-## 2. Prerequisites
-
-*   A fresh Debian 12 VPS.
-*   Access to the VPS as `root` or a user with `sudo` privileges (e.g., the default `debian` user on many cloud providers).
-*   An SSH key pair on your local machine to access the VPS.
 
 ## 3. Documentation
 
@@ -50,7 +51,7 @@ For more detailed information, please refer to the following guides in the `docs
 
 ## 4. Repository Contents
 
-*   **`README.md`**: This file (Quickstart and links to further documentation).
+*   **`README.md`**: This file (Prerequisites, Quickstart, and links to further documentation).
 *   **`vps-setup.sh`**: The main setup script to be run on the VPS.
 *   **`monitoring/`**: Contains the canonical Docker Compose and Prometheus configuration files for the central monitoring stack, which are copied by `vps-setup.sh` to `/opt/monitoring/` on the VPS.
     *   `monitoring/docker-compose.monitoring.yml`

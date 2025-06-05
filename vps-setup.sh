@@ -164,156 +164,70 @@ echo "---------------------------------------------------"
 sudo -u "${DEPLOY_USER}" mkdir -p "/home/${DEPLOY_USER}/.ssh"
 sudo -u "${DEPLOY_USER}" touch "/home/${DEPLOY_USER}/.ssh/known_hosts"
 sudo -u "${DEPLOY_USER}" chmod 600 "/home/${DEPLOY_USER}/.ssh/known_hosts"
-GITHUB_HOST_KEY=$(ssh-keyscan github.com 2>/dev/null)
-echo "${GITHUB_HOST_KEY}" | sudo -u "${DEPLOY_USER}" tee -a "/home/${DEPLOY_USER}/.ssh/known_hosts" >/dev/null
+# Add GitHub's key to known_hosts. This might fetch multiple key types.
+# We only need one to succeed for the connection to be established without prompt.
+ssh-keyscan github.com 2>/dev/null | sudo -u "${DEPLOY_USER}" tee "/home/${DEPLOY_USER}/.ssh/known_hosts" > /dev/null
+# Ensure permissions are strict again after tee, as tee might change them depending on umask.
+sudo -u "${DEPLOY_USER}" chmod 600 "/home/${DEPLOY_USER}/.ssh/known_hosts"
 
-echo "   Attempting SSH connection to GitHub..."
-if sudo -u "${DEPLOY_USER}" ssh -T git@github.com; then
-    echo "   ✅ SSH to GitHub successful for user ${DEPLOY_USER}."
+echo "   Attempting SSH connection to GitHub as user '${DEPLOY_USER}'..."
+# ssh -T git@github.com exits with 1 on success, so check output for success message.
+if sudo -u "${DEPLOY_USER}" ssh -T git@github.com 2>&1 | grep -q "You've successfully authenticated"; then
+    echo "   ✅ SSH to GitHub successful for user ${DEPLOY_USER}. Authentication confirmed."
+elif sudo -u "${DEPLOY_USER}" ssh -T git@github.com 2>&1 | grep -q "Warning: Permanently added 'github.com'"; then
+    echo "   ✅ SSH to GitHub successful for user ${DEPLOY_USER}. Host key added and authentication confirmed (check for username in message)."
+    # It's possible the "You've successfully authenticated" message is also present, grep -q exits on first match.
+    # For a more robust check, one could capture the full output and check both.
 else
-    echo "   ⚠️  SSH to GitHub failed. Details should be above."
-    echo "      Common issues: Key not added to GitHub, or local network issues."
-    echo "      The script will continue, but git operations for '${DEPLOY_USER}' might fail."
+    echo "   ⚠️  SSH to GitHub failed for user ${DEPLOY_USER}."
+    echo "      Output of ssh -T git@github.com (run as ${DEPLOY_USER}):"
+    sudo -u "${DEPLOY_USER}" ssh -T git@github.com 2>&1 || true # Print output regardless of exit code
+    echo "      Common issues: Key not added to GitHub account, or network connectivity problems."
+    echo "      The script will continue, but git operations for '${DEPLOY_USER}' might fail later."
 fi
-
 
 echo
 echo "9) Setting up Central Monitoring Stack (Prometheus & Grafana)..."
 echo "-----------------------------------------------------------------"
-mkdir -p "${PROMETHEUS_CONFIG_DIR}"
-echo "   → Ensured monitoring directories exist: ${MONITORING_DIR}, ${PROMETHEUS_CONFIG_DIR}"
+# Define source paths from the cloned repository
+CLONED_REPO_PATH="/opt/vps-core-setup" # This is where the script clones the repo
+SOURCE_DOCKER_COMPOSE_MONITORING_FILE="${CLONED_REPO_PATH}/monitoring/docker-compose.monitoring.yml"
+SOURCE_PROMETHEUS_CONFIG_FILE="${CLONED_REPO_PATH}/monitoring/prometheus_config/prometheus.yml"
 
-echo "   → Creating Docker Compose file for monitoring stack at ${DOCKER_COMPOSE_MONITORING_FILE}..."
-cat << 'EOF_COMPOSE' > "${DOCKER_COMPOSE_MONITORING_FILE}"
-version: '3.8'
+echo "   → Ensuring monitoring directories exist: ${MONITORING_DIR}, ${PROMETHEUS_CONFIG_DIR}"
+mkdir -p "${PROMETHEUS_CONFIG_DIR}" # This creates /opt/monitoring and /opt/monitoring/prometheus_config
 
-networks:
-  monitoring_network:
-    name: monitoring_network
-    driver: bridge
+if [ -f "${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}" ]; then
+    echo "   → Copying Docker Compose file for monitoring stack to ${DOCKER_COMPOSE_MONITORING_FILE}..."
+    cp "${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}" "${DOCKER_COMPOSE_MONITORING_FILE}"
+    echo "   → ${DOCKER_COMPOSE_MONITORING_FILE} copied."
+else
+    echo "   ⚠️ ERROR: Source Docker Compose file not found at ${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}. Cannot set up monitoring stack."
+    # Optionally, exit here if this is critical: exit 1
+fi
 
-volumes:
-  prometheus_data: {} # Docker managed volume for Prometheus
-  grafana_data: {}    # Docker managed volume for Grafana
-
-services:
-  prometheus:
-    image: prom/prometheus:v2.47.2
-    container_name: central_prometheus
-    restart: unless-stopped
-    networks:
-      - monitoring_network
-    ports:
-      - "9090:9090" # Prometheus UI
-    volumes:
-      - ./prometheus_config:/etc/prometheus:ro
-      - prometheus_data:/prometheus
-    user: "65534:65534" # nobody:nogroup
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.enable-lifecycle' # Allows reloading config via API POST to /-/reload
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--log.level=info'
-
-  grafana:
-    image: grafana/grafana-oss:latest # Use latest stable OSS version
-    container_name: central_grafana
-    restart: unless-stopped
-    networks:
-      - monitoring_network
-    ports:
-      - "3000:3000" # Grafana UI
-    volumes:
-      - grafana_data:/var/lib/grafana
-    user: "472:472" # grafana user
-    # environment:
-    #   - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_admin_password
-    # Add GF_SECURITY_ADMIN_PASSWORD for production or use secrets
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: central_node_exporter
-    restart: unless-stopped
-    networks:
-      - monitoring_network
-    # Node exporter does not need to expose ports to host, Prometheus scrapes it over monitoring_network
-    # ports:
-    #   - "9100:9100" # Expose if direct access is needed for debugging
-    pid: "host"
-    volumes:
-      - /:/host:ro,rslave
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-    command:
-      - '--path.rootfs=/host'
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run/docker/netns|var/lib/docker/containers/.+|var/lib/docker/overlay2/.+)($$|/)'
-      - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: central_cadvisor
-    restart: unless-stopped
-    networks:
-      - monitoring_network
-    # cAdvisor's own UI is on port 8080, not exposed to host by default
-    # ports:
-    #  - "8080:8080" # Expose if direct access is needed for debugging
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:rw # Docker socket access
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro # Docker lib directory
-      - /sys/fs/cgroup:/sys/fs/cgroup:ro # cgroup v2 (adjust for cgroup v1 if needed)
-    privileged: true # Required for full metrics access
-EOF_COMPOSE
-echo "   → ${DOCKER_COMPOSE_MONITORING_FILE} created."
-
-echo "   → Creating initial Prometheus configuration at ${PROMETHEUS_CONFIG_FILE}..."
-cat << 'EOF_PROM_CONFIG' > "${PROMETHEUS_CONFIG_FILE}"
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-  # external_labels:
-  #   monitor: 'vps-central-monitor'
-
-scrape_configs:
-  - job_name: 'prometheus' # Scrapes Prometheus itself
-    static_configs:
-      - targets: ['central_prometheus:9090']
-
-  - job_name: 'node-exporter' # Scrapes Node Exporter for host metrics
-    static_configs:
-      - targets: ['central_node_exporter:9100']
-
-  - job_name: 'cadvisor' # Scrapes cAdvisor for container metrics
-    static_configs:
-      - targets: ['central_cadvisor:8080']
-
-  # Example: How to add a scrape job for an application like LOB-Collector
-  # This section would be manually added or managed by other means after initial setup.
-  # - job_name: 'lob-collector-app'
-  #   static_configs:
-  #     - targets: ['<lob_collector_container_name_or_ip_on_monitoring_network>:<lob_collector_metrics_port>']
-  #   # Example with DNS service discovery if lob-collector is on the same Docker network:
-  #   # dns_sd_configs:
-  #   # - names:
-  #   #   - 'tasks.lob-collector' # If service name in another compose is 'lob-collector'
-  #   #   type: 'A'
-  #   #   port: 8001 # The metrics port of lob-collector
-EOF_PROM_CONFIG
-echo "   → ${PROMETHEUS_CONFIG_FILE} created."
+if [ -f "${SOURCE_PROMETHEUS_CONFIG_FILE}" ]; then
+    echo "   → Copying initial Prometheus configuration to ${PROMETHEUS_CONFIG_FILE}..."
+    cp "${SOURCE_PROMETHEUS_CONFIG_FILE}" "${PROMETHEUS_CONFIG_FILE}"
+    echo "   → ${PROMETHEUS_CONFIG_FILE} copied."
+else
+    echo "   ⚠️ ERROR: Source Prometheus config file not found at ${SOURCE_PROMETHEUS_CONFIG_FILE}. Cannot set up monitoring stack."
+    # Optionally, exit here: exit 1
+fi
 
 echo "   → Starting central Prometheus, Grafana, Node Exporter, and cAdvisor services..."
 # Ensure the monitoring directory exists and cd into it to use relative paths in compose file
-if (cd "${MONITORING_DIR}" && docker compose -f "${DOCKER_COMPOSE_MONITORING_FILE##*/}" up -d); then
-  echo "   → Central monitoring stack (Prometheus, Grafana, etc.) started successfully."
+# The DOCKER_COMPOSE_MONITORING_FILE variable already points to the correct path in /opt/monitoring
+if [ -f "${DOCKER_COMPOSE_MONITORING_FILE}" ]; then # Check if the target file was successfully copied
+    if (cd "${MONITORING_DIR}" && docker compose -f "${DOCKER_COMPOSE_MONITORING_FILE##*/}" up -d); then
+        echo "   → Central monitoring stack (Prometheus, Grafana, etc.) started successfully."
+    else
+        echo "   ⚠️  Failed to start monitoring stack. Check Docker Compose logs in ${MONITORING_DIR}."
+    fi
 else
-  echo "   ⚠️  Failed to start monitoring stack. Check Docker Compose logs in ${MONITORING_DIR}."
+    echo "   ⚠️  Skipping start of monitoring stack as configuration files were not found/copied."
 fi
+
 echo "     - Prometheus UI should be available at: http://<VPS_IP>:9090"
 echo "     - Grafana UI should be available at: http://<VPS_IP>:3000 (default login: admin/admin)"
 echo "     - Note: It might take a minute for services to be fully available."

@@ -18,12 +18,12 @@ This section provides a more in-depth look at the `vps-setup.sh` script and its 
     ssh debian@<YOUR_VPS_IP> # Or your initial sudo user
     ```
 
-3.  **Clone the Repository:** The recommended way to get the script onto your VPS is by cloning this repository (assuming `git` is pre-installed).
+3.  **Clone the Repository:** The recommended way to get the script onto your VPS is by cloning this repository (assuming `git` is pre-installed). Since we are cloning into `/opt`, `sudo` is required for the `git clone` command.
     ```bash
-    # Clone the repository.
+    # Clone the repository into /opt (requires sudo)
     sudo git clone https://github.com/rvirgilli/vps-core-setup.git /opt/vps-core-setup
     ```
-    This will place the script at `/opt/vps-core-setup/vps-setup.sh`. The `vps-setup.sh` script itself *must* be run with `sudo`.
+    This will place the script at `/opt/vps-core-setup/vps-setup.sh`. The `vps-setup.sh` script itself *must* also be run with `sudo`.
 
 ### 1.2. Make the Script Executable and Run
 
