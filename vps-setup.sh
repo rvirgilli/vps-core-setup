@@ -46,7 +46,7 @@ echo "1) Updating system and installing basic packages..."
 echo "--------------------------------------------------"
 apt-get update
 apt-get upgrade -y "${DPKG_OPTS[@]}"
-apt-get install -y "${DPKG_OPTS[@]}" curl ufw jq git
+apt-get install -y "${DPKG_OPTS[@]}" curl ufw jq git rsync
 
 echo
 echo "2) Installing Docker (if not already installed)..."

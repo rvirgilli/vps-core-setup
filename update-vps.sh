@@ -79,8 +79,8 @@ echo
 echo "3) Applying changes with Docker Compose..."
 echo "------------------------------------------"
 cd "${DEST_MONITORING_DIR}"
-echo "   → Running 'docker compose up -d'. This will recreate any services whose configuration has changed."
-docker compose up -d
+echo "   → Running 'docker compose -f docker-compose.monitoring.yml up -d'. This will recreate any services whose configuration has changed."
+docker compose -f docker-compose.monitoring.yml up -d
 
 echo
 echo "✅ Update complete. The monitoring stack has been updated to the latest version." 
