@@ -37,6 +37,8 @@ services:
     ports:
       - "3000:3000" # Grafana UI
     volumes:
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana # Persistent data for Grafana
     user: "472:472" # grafana user
     # environment:

@@ -1,0 +1,19 @@
+- job_name: 'prometheus' # Scrapes Prometheus itself
+  static_configs:
+    - targets: ['localhost:9090']
+
+- job_name: 'node-exporter' # Scrapes Node Exporter for host metrics
+  # The node-exporter service is on the same 'monitoring_network'
+  # and its default port is 9100.
+  static_configs:
+    # Use the Docker service name for the target.
+    # Docker's internal DNS will resolve 'node-exporter' to the correct container IP.
+    - targets: ['node-exporter:9100']
+
+- job_name: 'cadvisor' # Scrapes cAdvisor for container metrics
+  # The cadvisor service is on the same 'monitoring_network'
+  # and its default port is 8080.
+  static_configs:
+    # Use the Docker service name for the target.
+    # Docker's internal DNS will resolve 'cadvisor' to the correct container IP.
+    - targets: ['cadvisor:8080'] 

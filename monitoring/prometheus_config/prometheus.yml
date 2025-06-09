@@ -4,26 +4,19 @@ global:
   # external_labels:
   #   monitor: 'vps-central-monitor'
 
+# Load scrape configurations from files.
+# This is the recommended way to add application monitoring without
+# altering this main configuration file.
+scrape_config_files:
+  - /etc/prometheus/conf.d/*.yml
+
+# A scrape configuration for Prometheus itself.
+# It's kept here as a safeguard and example.
+# All other core targets are in conf.d/core-targets.yml
 scrape_configs:
-  - job_name: 'prometheus' # Scrapes Prometheus itself
+  - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-
-  - job_name: 'node-exporter' # Scrapes Node Exporter for host metrics
-    # The node-exporter service is on the same 'monitoring_network'
-    # and its default port is 9100.
-    static_configs:
-      # Use the Docker service name for the target.
-      # Docker's internal DNS will resolve 'node-exporter' to the correct container IP.
-      - targets: ['node-exporter:9100']
-
-  - job_name: 'cadvisor' # Scrapes cAdvisor for container metrics
-    # The cadvisor service is on the same 'monitoring_network'
-    # and its default port is 8080.
-    static_configs:
-      # Use the Docker service name for the target.
-      # Docker's internal DNS will resolve 'cadvisor' to the correct container IP.
-      - targets: ['cadvisor:8080']
 
 # --- Application Specific Scrape Configs ---
 # This section is where you would add configurations for your applications.

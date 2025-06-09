@@ -11,8 +11,8 @@ set -euo pipefail # Exit on error, treat unset variables as an error, propagate 
 # --- Configuration ---
 PROMETHEUS_URL="http://127.0.0.1:9090"
 GRAFANA_URL="http://127.0.0.1:3000"
-CENTRAL_PROM_CONFIG_PATH="/opt/monitoring/prometheus_config/prometheus.yml"
-CENTRAL_PROM_CONFIG_BACKUP_PATH="/opt/monitoring/prometheus_config/prometheus.yml.test-bak"
+CENTRAL_PROM_CONF_DIR="/opt/monitoring/prometheus_config/conf.d"
+DUMMY_APP_PROM_CONFIG_FILE="${CENTRAL_PROM_CONF_DIR}/dummy-app-test.yml"
 DUMMY_APP_DIR="./test_assets/dummy_app"
 DUMMY_APP_COMPOSE_FILE="${DUMMY_APP_DIR}/docker-compose.dummy.yml"
 DUMMY_APP_CONTAINER_NAME="dummy_app_container"
@@ -70,18 +70,16 @@ cleanup_and_exit() {
         echo "   Dummy application not running."
     fi
 
-    # Restore Prometheus configuration if backup exists
-    if [ -f "${CENTRAL_PROM_CONFIG_BACKUP_PATH}" ]; then
-        echo "   Restoring original Prometheus configuration..."
-        sudo mv "${CENTRAL_PROM_CONFIG_BACKUP_PATH}" "${CENTRAL_PROM_CONFIG_PATH}"
+    # Remove the dummy app's prometheus config file if it exists
+    if [ -f "${DUMMY_APP_PROM_CONFIG_FILE}" ]; then
+        echo "   Removing dummy app Prometheus configuration..."
+        sudo rm -f "${DUMMY_APP_PROM_CONFIG_FILE}"
         echo "   Reloading Prometheus configuration..."
         if sudo curl -s -X POST "${PROMETHEUS_URL}/-/reload" > /dev/null 2>&1; then
-            pass_test "Prometheus configuration restored and reloaded."
+            pass_test "Prometheus configuration reloaded after removing test file."
         else
-            warn_test "Failed to reload Prometheus after restoring config. Please check manually."
+            warn_test "Failed to reload Prometheus after removing test file. Please check manually."
         fi
-    else
-        echo "   No Prometheus backup file found to restore."
     fi
 
     # Print final status
@@ -206,20 +204,23 @@ else
 fi
 
 print_step "Phase 3: Configuring Prometheus to Scrape Dummy Application..."
-# Create backup of Prometheus configuration
-echo "   Backing up Prometheus configuration..."
-if sudo cp "${CENTRAL_PROM_CONFIG_PATH}" "${CENTRAL_PROM_CONFIG_BACKUP_PATH}"; then
-    pass_test "Prometheus configuration backed up."
+# Create a dedicated scrape config file for the dummy app
+echo "   Creating Prometheus scrape configuration file for dummy app..."
+SCRAPE_CONFIG="- job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'\n  static_configs:\n    - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']"
+
+# Use a here-document with sudo tee to create the file as root
+sudo tee "${DUMMY_APP_PROM_CONFIG_FILE}" > /dev/null << EOF
+- job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'
+  static_configs:
+    - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']
+EOF
+
+if [ -f "${DUMMY_APP_PROM_CONFIG_FILE}" ]; then
+    pass_test "Scrape configuration file created at ${DUMMY_APP_PROM_CONFIG_FILE}."
 else
-    fail_test "Failed to back up Prometheus configuration."
+    fail_test "Failed to create scrape configuration file."
     cleanup_and_exit
 fi
-
-# Add scrape job for dummy application
-echo "   Adding scrape configuration for dummy application..."
-SCRAPE_CONFIG="\n  - job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'\n    static_configs:\n      - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']"
-echo -e "${SCRAPE_CONFIG}" | sudo tee -a "${CENTRAL_PROM_CONFIG_PATH}" > /dev/null
-pass_test "Scrape configuration added."
 
 # Reload Prometheus configuration
 echo "   Reloading Prometheus configuration..."

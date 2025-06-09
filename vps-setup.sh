@@ -222,41 +222,27 @@ else
 fi
 
 # Define source paths from the cloned repository
-SOURCE_DOCKER_COMPOSE_MONITORING_FILE="${REPO_CLONE_DIR}/monitoring/docker-compose.monitoring.yml"
-SOURCE_PROMETHEUS_CONFIG_FILE="${REPO_CLONE_DIR}/monitoring/prometheus_config/prometheus.yml"
+SOURCE_MONITORING_DIR="${REPO_CLONE_DIR}/monitoring"
+DEST_MONITORING_DIR="${MONITORING_DIR}"
 
-echo "   → Ensuring monitoring directories exist: ${MONITORING_DIR}, ${PROMETHEUS_CONFIG_DIR}"
-mkdir -p "${PROMETHEUS_CONFIG_DIR}" # This creates /opt/monitoring and /opt/monitoring/prometheus_config
+echo "   → Ensuring monitoring directories exist: ${DEST_MONITORING_DIR}"
+mkdir -p "${DEST_MONITORING_DIR}"
 
-if [ -f "${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}" ]; then
-    echo "   → Copying Docker Compose file for monitoring stack to ${DOCKER_COMPOSE_MONITORING_FILE}..."
-    cp "${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}" "${DOCKER_COMPOSE_MONITORING_FILE}"
-    echo "   → ${DOCKER_COMPOSE_MONITORING_FILE} copied."
-else
-    echo "   ⚠️ ERROR: Source Docker Compose file not found at ${SOURCE_DOCKER_COMPOSE_MONITORING_FILE}. Cannot set up monitoring stack."
-    exit 1
-fi
-
-if [ -f "${SOURCE_PROMETHEUS_CONFIG_FILE}" ]; then
-    echo "   → Copying initial Prometheus configuration to ${PROMETHEUS_CONFIG_FILE}..."
-    cp "${SOURCE_PROMETHEUS_CONFIG_FILE}" "${PROMETHEUS_CONFIG_FILE}"
-    echo "   → ${PROMETHEUS_CONFIG_FILE} copied."
-else
-    echo "   ⚠️ ERROR: Source Prometheus config file not found at ${SOURCE_PROMETHEUS_CONFIG_FILE}. Cannot set up monitoring stack."
-    exit 1
-fi
+echo "   → Copying all monitoring configurations from ${SOURCE_MONITORING_DIR}..."
+# Use rsync to be efficient and clean.
+# This ensures that all necessary files and directories (docker-compose, grafana, prometheus_config) are copied.
+rsync -av --delete "${SOURCE_MONITORING_DIR}/" "${DEST_MONITORING_DIR}/"
+echo "   → All configurations copied to ${DEST_MONITORING_DIR}."
 
 echo "   → Starting central Prometheus, Grafana, Node Exporter, and cAdvisor services..."
 # Ensure the monitoring directory exists and cd into it to use relative paths in compose file
-# The DOCKER_COMPOSE_MONITORING_FILE variable already points to the correct path in /opt/monitoring
-if [ -f "${DOCKER_COMPOSE_MONITORING_FILE}" ]; then # Check if the target file was successfully copied
-    if (cd "${MONITORING_DIR}" && docker compose -f "${DOCKER_COMPOSE_MONITORING_FILE##*/}" up -d); then
-        echo "   → Central monitoring stack (Prometheus, Grafana, etc.) started successfully."
-    else
-        echo "   ⚠️  Failed to start monitoring stack. Check Docker Compose logs in ${MONITORING_DIR}."
-    fi
+if [ -d "${DEST_MONITORING_DIR}" ]; then
+    cd "${DEST_MONITORING_DIR}"
+    echo "   → Running 'docker compose up -d' from ${PWD}..."
+    docker compose up -d
 else
-    echo "   ⚠️  Skipping start of monitoring stack as configuration files were not found/copied."
+    echo "   ⚠️ ERROR: Monitoring directory ${DEST_MONITORING_DIR} not found. Cannot start services."
+    exit 1
 fi
 
 echo "     - Prometheus UI should be available at: http://<VPS_IP>:9090"

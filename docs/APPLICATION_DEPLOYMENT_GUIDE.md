@@ -18,7 +18,7 @@ When deploying your application, you can assume the following about the VPS envi
     *   A Docker network named `monitoring_network` exists.
     *   A central Prometheus instance (container name: `central_prometheus`) is running and connected to `monitoring_network`, scraping metrics from the host (Node Exporter) and containers (cAdvisor).
     *   A central Grafana instance (container name: `central_grafana`) is running for dashboards.
-    *   The Prometheus configuration is at `/opt/monitoring/prometheus_config/prometheus.yml` (editable by `deploy` with `sudo`).
+    *   Prometheus is configured to load all scrape configurations from `/opt/monitoring/prometheus_config/conf.d/`. To add your application, you will create a new `.yml` file in this directory.
 
 ## 2. Preparing Your Application for Deployment
 
@@ -131,19 +131,19 @@ Create a `docker-compose.yaml` file for your application. This simplifies deploy
 
 If your application exposes metrics on a Prometheus-compatible endpoint (e.g., `my-app-service` on port `8001` at `/metrics`):
 
-1.  **Edit Central Prometheus Configuration (as `deploy` with `sudo`):**
+1.  **Create a Scrape Configuration File (as `deploy` with `sudo`):**
+    Create a new YAML file in the Prometheus drop-in configuration directory. Give it a descriptive name for your application.
     ```bash
-    sudo nano /opt/monitoring/prometheus_config/prometheus.yml
+    sudo nano /opt/monitoring/prometheus_config/conf.d/my-app.yml
     ```
 
-2.  **Add a Scrape Job:** Append a new job under `scrape_configs`:
+2.  **Add the Scrape Job:**
+    Add the scrape job definition to the new file. This should be a list containing one or more jobs.
     ```yaml
-    # ... (existing scrape_configs) ...
-
-    - job_name: 'my-app-service' # Or a more descriptive name for your app
+    - job_name: 'my-app-service' # A descriptive name for your app's scrape job
       static_configs:
         # Target: <service_name_in_docker_compose>:<metrics_port_inside_container>
-        # The service name is resolvable because both Prometheus and your app are on 'monitoring_network'
+        # The service name is resolvable because both Prometheus and your app are on 'monitoring_network'.
         - targets: ['my-app-service:8001'] # Assuming your app metrics are on port 8001
     ```
     *   **Target:** Use the service name defined in your application's `docker-compose.yaml` (e.g., `my-app-service`). Prometheus can resolve this name because it's on the same `monitoring_network`.
@@ -159,7 +159,7 @@ If your application exposes metrics on a Prometheus-compatible endpoint (e.g., `
 5.  **Verify in Prometheus UI:**
     *   Go to `http://<YOUR_VPS_IP>:9090` -> Status -> Targets.
     *   Your new job should appear and eventually show as `UP`.
-    *   You can now query your application's metrics in Prometheus and build dashboards in Grafana (`http://<YOUR_VPS_IP>:3000`). Refer to the main `vps-core-setup/README.md` for Grafana basics.
+    *   You can now query your application's metrics in Prometheus. Before creating a new dashboard from scratch in Grafana (`http://<YOUR_VPS_IP>:3000`), check the pre-configured dashboards for Node Exporter and cAdvisor. They may already show the container-level metrics (CPU, memory, network) for your new application, providing immediate insight without any extra work.
 
 ## 5. Firewall Adjustments
 
