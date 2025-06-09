@@ -138,13 +138,14 @@ If your application exposes metrics on a Prometheus-compatible endpoint (e.g., `
     ```
 
 2.  **Add the Scrape Job:**
-    Add the scrape job definition to the new file. This should be a list containing one or more jobs.
+    Add the scrape job definition to the new file. This should be a full configuration document containing one or more jobs.
     ```yaml
-    - job_name: 'my-app-service' # A descriptive name for your app's scrape job
-      static_configs:
-        # Target: <service_name_in_docker_compose>:<metrics_port_inside_container>
-        # The service name is resolvable because both Prometheus and your app are on 'monitoring_network'.
-        - targets: ['my-app-service:8001'] # Assuming your app metrics are on port 8001
+    scrape_configs:
+      - job_name: 'my-app-service' # A descriptive name for your app's scrape job
+        static_configs:
+          # Target: <service_name_in_docker_compose>:<metrics_port_inside_container>
+          # The service name is resolvable because both Prometheus and your app are on 'monitoring_network'.
+          - targets: ['my-app-service:8001'] # Assuming your app metrics are on port 8001
     ```
     *   **Target:** Use the service name defined in your application's `docker-compose.yaml` (e.g., `my-app-service`). Prometheus can resolve this name because it's on the same `monitoring_network`.
 

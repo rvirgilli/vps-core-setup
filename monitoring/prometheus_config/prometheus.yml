@@ -10,6 +10,10 @@ global:
 scrape_config_files:
   - /etc/prometheus/conf.d/*.yml
 
+# All scrape configurations are now loaded from the files specified
+# in the scrape_config_files directive above. This ensures a modular
+# and clean configuration setup.
+
 # A scrape configuration for Prometheus itself.
 # It's kept here as a safeguard and example.
 # All other core targets are in conf.d/core-targets.yml
