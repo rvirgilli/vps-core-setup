@@ -66,7 +66,9 @@ cp "${SOURCE_MONITORING_DIR}/prometheus_config/prometheus.yml" "${DEST_MONITORIN
 # This is efficient and will remove any old files that are no longer in the repository,
 # keeping the configuration clean.
 echo "   → Syncing prometheus_config/conf.d/ directory..."
-rsync -av --delete "${SOURCE_MONITORING_DIR}/prometheus_config/conf.d/" "${DEST_MONITORING_DIR}/prometheus_config/conf.d/"
+# We intentionally do NOT use --delete here, so that user-added application
+# scrape configs are preserved during an update.
+rsync -av "${SOURCE_MONITORING_DIR}/prometheus_config/conf.d/" "${DEST_MONITORING_DIR}/prometheus_config/conf.d/"
 
 echo "   → Syncing grafana/ directory..."
 rsync -av --delete "${SOURCE_MONITORING_DIR}/grafana/" "${DEST_MONITORING_DIR}/grafana/"
