@@ -206,13 +206,14 @@ fi
 print_step "Phase 3: Configuring Prometheus to Scrape Dummy Application..."
 # Create a dedicated scrape config file for the dummy app
 echo "   Creating Prometheus scrape configuration file for dummy app..."
-SCRAPE_CONFIG="- job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'\n  static_configs:\n    - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']"
 
-# Use a here-document with sudo tee to create the file as root
+# The scrape config file must have a `scrape_configs` key.
+# Use a here-document with sudo tee to create the file as root.
 sudo tee "${DUMMY_APP_PROM_CONFIG_FILE}" > /dev/null << EOF
-- job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'
-  static_configs:
-    - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']
+scrape_configs:
+  - job_name: '${DUMMY_APP_SCRAPE_JOB_NAME}'
+    static_configs:
+      - targets: ['${DUMMY_APP_CONTAINER_NAME}:${DUMMY_APP_METRICS_PORT}']
 EOF
 
 if [ -f "${DUMMY_APP_PROM_CONFIG_FILE}" ]; then
