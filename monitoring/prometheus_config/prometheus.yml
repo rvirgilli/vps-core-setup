@@ -1,45 +1,9 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  # external_labels:
-  #   monitor: 'vps-central-monitor'
 
-# Load scrape configurations from files.
-# This is the recommended way to add application monitoring without
-# altering this main configuration file.
+# Load all scrape configurations from the 'conf.d' directory.
+# This ensures a modular and clean setup where each target or group of
+# targets has its own configuration file.
 scrape_config_files:
-  - /etc/prometheus/conf.d/*.yml
-
-# All scrape configurations are now loaded from the files specified
-# in the scrape_config_files directive above. This ensures a modular
-# and clean configuration setup.
-
-# A scrape configuration for Prometheus itself.
-# It's kept here as a safeguard and example.
-# All other core targets are in conf.d/core-targets.yml
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-# --- Application Specific Scrape Configs ---
-# This section is where you would add configurations for your applications.
-# The vps-core-setup README.md explains how to do this.
-
-# Example for an application named 'my-app' exposing metrics on port 8001:
-# - job_name: 'my-app'
-#   # Assuming 'my-app' is on the 'monitoring_network' Docker network
-#   # and its service name in its own docker-compose.yaml is 'my_app_service_name'.
-#   # If it was started with `docker run --name my-app-container ...` on the monitoring_network,
-#   # you could use 'my-app-container:8001'.
-#   # If using Docker Swarm or a compose file with service name 'my_app_service',
-#   # Docker DNS should resolve 'my_app_service_name:8001'.
-#   static_configs:
-#     - targets: ['my-app-container-name-or-service-name:8001']
-
-# Example for LOB Collector (if deployed on the same Docker host and joined to monitoring_network):
-# - job_name: 'lob-collector'
-#   static_configs:
-#     # 'lob-collector' is the service name in its docker-compose.yaml
-#     # 8001 is the default metrics port for lob-collector
-#     - targets: ['lob-collector:8001'] 
+  - /etc/prometheus/conf.d/*.yml 
